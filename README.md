@@ -1,6 +1,6 @@
 # Intelligent Kubernetes Maintenance & Reliability Platform
 
-This standalone platform plans and rehearses Kubernetes node maintenance. Simulation remains the default and seeds an original cluster of three nodes, three workloads, and five pods. Stage 4 adds opt-in discovery, dry-run forecasts, and approved maintenance against a dedicated four-node Kind lab. The simulator, batch scheduling, and durable job APIs are still available.
+This standalone platform plans and rehearses Kubernetes node maintenance. Simulation remains the default and seeds an original cluster of three nodes, three workloads, and five pods. Stage 4 adds opt-in discovery, dry-run forecasts, and approved maintenance against a dedicated four-node Kind lab. Stage 5 adds event correlation, capacity warnings, and evidence-based recommendations with authenticated remediation approval. The simulator, batch scheduling, and durable job APIs are still available.
 
 ## Run locally
 
@@ -19,6 +19,10 @@ Open the API documentation at `http://127.0.0.1:8000/docs`. The default database
 ## Run the Kubernetes lab
 
 Use [the Kubernetes lab guide](docs/KUBERNETES.md) to create `k8s-reliability-lab`, install the demo workloads and restricted credentials, review a live dry-run plan, and approve a worker drain. The guide includes the measured integration test results. Live mode patches scheduling and evicts eligible pods through Kubernetes. Reboot and OS patching are simulated.
+
+## Explore AIOps
+
+Start the API in simulation mode and send `POST /aiops/demo` to seed original incident scenarios. Use `GET /aiops/incidents` to review correlated signals and request a recommendation for any open incident. The default mock provider runs locally with zero API charges. See the [AIOps guide](docs/AIOPS.md) for the approval workflow, optional provider configuration, and Kind validation.
 
 ## Rehearse single-node maintenance
 

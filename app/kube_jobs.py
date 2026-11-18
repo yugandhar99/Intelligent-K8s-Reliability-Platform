@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from .jobs import Job
 from .kube_adapter import EvictionBlocked, KubeUnavailable, LabSafetyError, OWNER
-from .kube_planning import Inventory, ready, scope, worker
+from .kube_planning import Inventory, disruption_available, ready, scope, worker
 from .models import Problem
 from .service import RecordNotFound, logger
 from .store import MaintenanceConflict
@@ -35,29 +35,32 @@ class LiveMaintenance:
 
     def approve(self, plan_id: str, approver: str) -> Job:
         with self.jobs.store.transaction(write=True) as db:
-            row = db.execute("SELECT payload FROM live_plans WHERE id = ?", (plan_id,)).fetchone()
-            if not row:
-                raise RecordNotFound("Live plan not found")
-            plan = json.loads(row[0])
-            existing = db.execute("SELECT payload FROM jobs WHERE kind = 'kubernetes' AND plan_id = ?",
-                                  (plan_id,)).fetchone()
-            if existing:
-                return Job.model_validate_json(existing[0])
-            if (plan["problems"] or self.jobs.clock() - plan["created"] > 300
-                    or plan["cluster_uid"] != self.adapter.pin["namespace_uid"]):
-                raise MaintenanceConflict("Approval requires a fresh, eligible plan for the pinned cluster")
-            if db.execute("""SELECT 1 FROM jobs WHERE kind = 'kubernetes' AND
-                json_extract(payload, '$.state') IN ('queued', 'running', 'retrying')""").fetchone():
-                raise MaintenanceConflict("Another live maintenance job is active")
-            job = Job(id=uuid4().hex, kind="kubernetes", plan_id=plan_id, nodes=[plan["node"]],
-                      total_steps=len(plan["pods"]) + 2)
-            db.execute("INSERT INTO jobs(id, kind, plan_id, payload) VALUES (?, ?, ?, ?)",
-                       (job.id, job.kind, plan_id, job.model_dump_json()))
-            run = {"plan": plan, "phase": "verify", "index": 0, "problem": None,
-                   "deadline": self.jobs.clock() + self.deadline}
-            db.execute("INSERT INTO live_checkpoints VALUES (?, ?)", (job.id, json.dumps(run)))
-            self.audit(db, job, "live.approved", approver=approver, node=plan["node"], plan=plan_id)
-            return job
+            return self.approve_in(db, plan_id, approver)
+
+    def approve_in(self, db, plan_id: str, approver: str, *, require_disruption: bool = False) -> Job:
+        row = db.execute("SELECT payload FROM live_plans WHERE id = ?", (plan_id,)).fetchone()
+        if not row:
+            raise RecordNotFound("Live plan not found")
+        plan = json.loads(row[0])
+        existing = db.execute("SELECT payload FROM jobs WHERE kind = 'kubernetes' AND plan_id = ?",
+                              (plan_id,)).fetchone()
+        if existing:
+            return Job.model_validate_json(existing[0])
+        if (plan["problems"] or self.jobs.clock() - plan["created"] > 300
+                or plan["cluster_uid"] != self.adapter.pin["namespace_uid"]):
+            raise MaintenanceConflict("Approval requires a fresh, eligible plan for the pinned cluster")
+        if db.execute("""SELECT 1 FROM jobs WHERE kind = 'kubernetes' AND
+            json_extract(payload, '$.state') IN ('queued', 'running', 'retrying')""").fetchone():
+            raise MaintenanceConflict("Another live maintenance job is active")
+        job = Job(id=uuid4().hex, kind="kubernetes", plan_id=plan_id, nodes=[plan["node"]],
+                  total_steps=len(plan["pods"]) + 2)
+        db.execute("INSERT INTO jobs(id, kind, plan_id, payload) VALUES (?, ?, ?, ?)",
+                   (job.id, job.kind, plan_id, job.model_dump_json()))
+        run = {"plan": plan, "phase": "verify", "index": 0, "problem": None,
+               "deadline": self.jobs.clock() + self.deadline, "require_disruption": require_disruption}
+        db.execute("INSERT INTO live_checkpoints VALUES (?, ?)", (job.id, json.dumps(run)))
+        self.audit(db, job, "live.approved", approver=approver, node=plan["node"], plan=plan_id)
+        return job
 
     def audit(self, db, job: Job, event: str, **fields) -> None:
         self.jobs.event(db, job, event, **fields)
@@ -123,14 +126,21 @@ class LiveMaintenance:
             raise LabSafetyError("Target worker identity or role changed")
         return meta.get("annotations", {}).get(OWNER), node.get("spec", {}).get("unschedulable", False)
 
+    @staticmethod
+    def validate_initial_scope(inventory: Inventory, run: dict) -> None:
+        plan = run["plan"]
+        current = inventory.plan(plan["node"])
+        if current["problems"] or scope(current) != scope(plan):
+            raise LabSafetyError("Approved workload scope or safety checks changed before cordoning")
+        if run.get("require_disruption") and not disruption_available(current):
+            raise LabSafetyError("A disruption budget currently reports no available disruption")
+
     def advance(self, db, job: Job, run: dict) -> None:
         plan, phase = run["plan"], run["phase"]
         target = plan["node"]
         inventory = Inventory(self.adapter.discover())
         if phase == "verify":
-            current = inventory.plan(target)
-            if current["problems"] or scope(current) != scope(plan):
-                raise LabSafetyError("Approved workload scope or safety checks changed before cordoning")
+            self.validate_initial_scope(inventory, run)
             run["phase"] = "cordon"
             run["cordon_intent"] = True
             self.audit(db, job, "live.cordon_intent", node=target)
@@ -142,9 +152,7 @@ class LiveMaintenance:
         owner, unschedulable = self.check_worker(node, plan)
         if phase == "cordon":
             if owner is None and not unschedulable:
-                current = inventory.plan(target)
-                if current["problems"] or scope(current) != scope(plan):
-                    raise LabSafetyError("Approved workload scope or safety checks changed before cordoning")
+                self.validate_initial_scope(inventory, run)
                 self.adapter.schedule(node, plan["node_uid"], job.id, cordon=True)
             elif owner != job.id or not unschedulable:
                 raise LabSafetyError("Another actor changed target scheduling ownership")

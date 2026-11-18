@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-crash-demo
+  namespace: reliability-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiops-crash-demo
+  template:
+    metadata:
+      labels:
+        app: aiops-crash-demo
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: deliberate-exit
+          image: nginx:1.28-alpine
+          command: ["/bin/sh", "-c", "exit 12"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-pending-demo
+  namespace: reliability-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiops-pending-demo
+  template:
+    metadata:
+      labels:
+        app: aiops-pending-demo
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: deliberately-unschedulable
+          image: nginx:1.28-alpine
+          resources:
+            requests:
+              cpu: "1000000"
+              memory: 8Mi

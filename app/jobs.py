@@ -134,19 +134,22 @@ class JobService:
         if kind == "kubernetes":
             raise MaintenanceConflict("Kubernetes execution requires the live approval endpoint")
         with self.store.transaction(write=True) as db:
-            row = db.execute("SELECT payload FROM jobs WHERE kind = ? AND plan_id = ?", (kind, plan_id)).fetchone()
-            if row:
-                return Job.model_validate_json(row[0])
-            table = "batch_operations" if kind == "batch" else "operations"
-            if db.execute(f"SELECT 1 FROM {table} WHERE plan_id = ?", (plan_id,)).fetchone():
-                raise MaintenanceConflict("This plan already has a synchronous operation")
-            plan = self.plan(db, kind, plan_id)
-            nodes = plan.nodes if isinstance(plan, BatchPlan) else [plan.node]
-            job = Job(id=uuid4().hex, kind=kind, plan_id=plan_id, nodes=nodes)
-            db.execute("INSERT INTO jobs(id, kind, plan_id, payload) VALUES (?, ?, ?, ?)",
-                       (job.id, kind, plan_id, job.model_dump_json()))
-            self.event(db, job, "job.queued")
-            return job
+            return self.submit_in(db, kind, plan_id)
+
+    def submit_in(self, db: sqlite3.Connection, kind: Literal["single", "batch"], plan_id: str) -> Job:
+        row = db.execute("SELECT payload FROM jobs WHERE kind = ? AND plan_id = ?", (kind, plan_id)).fetchone()
+        if row:
+            return Job.model_validate_json(row[0])
+        table = "batch_operations" if kind == "batch" else "operations"
+        if db.execute(f"SELECT 1 FROM {table} WHERE plan_id = ?", (plan_id,)).fetchone():
+            raise MaintenanceConflict("This plan already has a synchronous operation")
+        plan = self.plan(db, kind, plan_id)
+        nodes = plan.nodes if isinstance(plan, BatchPlan) else [plan.node]
+        job = Job(id=uuid4().hex, kind=kind, plan_id=plan_id, nodes=nodes)
+        db.execute("INSERT INTO jobs(id, kind, plan_id, payload) VALUES (?, ?, ?, ?)",
+                   (job.id, kind, plan_id, job.model_dump_json()))
+        self.event(db, job, "job.queued")
+        return job
 
     def status(self, job_id: str) -> Job:
         with self.store.transaction() as db:

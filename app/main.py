@@ -5,12 +5,16 @@ import json
 import logging
 import os
 from pathlib import Path
+from time import time
 import sqlite3
 import tomllib
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .aiops import IncidentService
+from .aiops_api import Operators, aiops_router
+from .aiops_providers import AIService, configured_provider
 from .batch_api import batch_router
 from .batch_models import BatchPolicy
 from .batch_service import BatchService
@@ -50,6 +54,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     if mode not in {"simulation", "kubernetes"}:
         raise ValueError("MAINTENANCE_MODE must be simulation or kubernetes")
     live = None
+    collector = None
     if mode == "kubernetes":
         from .kube_adapter import KubeUnavailable, KubernetesAdapter, LabSafetyError
         from .kube_api import live_router
@@ -61,6 +66,17 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         adapter = KubernetesAdapter(Path(os.environ["LAB_KUBECONFIG"]), Path(os.environ["LAB_IDENTITY"]))
         live = jobs.live = LiveMaintenance(jobs, adapter)
 
+    operators = Operators(os.getenv("AIOPS_OPERATOR_TOKENS", "{}"))
+    ai = AIService(store, configured_provider(), int(os.getenv("AIOPS_DAILY_LIMIT_MICROUSD", "0")), time)
+    aiops = IncidentService(jobs, ai)
+    if live:
+        from .aiops_collector import EventCollector
+
+        interval = int(os.getenv("AIOPS_COLLECTION_SECONDS", "30"))
+        if interval < 0:
+            raise ValueError("AIOPS_COLLECTION_SECONDS must be nonnegative")
+        if interval:
+            collector = EventCollector(aiops, interval)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -75,19 +91,25 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         jobs.initialize()
         if live:
             live.initialize()
+        aiops.initialize()
         worker = JobWorker(jobs)
         worker.start()
+        if collector:
+            collector.thread.start()
         try:
             yield
         finally:
+            if collector:
+                await asyncio.to_thread(collector.close)
             await asyncio.to_thread(worker.close)
             if live:
                 live.adapter.close()
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.4.0", lifespan=lifespan)
+                  version="0.5.0", lifespan=lifespan)
     app.include_router(batch_router(batch_service))
     app.include_router(job_router(jobs))
+    app.include_router(aiops_router(aiops, operators))
 
     if live:
         app.include_router(live_router(live, approval_token))

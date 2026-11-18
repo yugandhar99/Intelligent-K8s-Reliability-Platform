@@ -86,10 +86,10 @@ class KubernetesAdapter:
         self.security.cleanup()
 
     @staticmethod
-    def read(method, *args):
+    def read(method, *args, **kwargs):
         for attempt in range(3):
             try:
-                return method(*args, _request_timeout=TIMEOUT)
+                return method(*args, _request_timeout=TIMEOUT, **kwargs)
             except ApiException as error:
                 if error.status == 404:
                     raise LabSafetyError("A required Kubernetes resource disappeared") from error
@@ -120,6 +120,18 @@ class KubernetesAdapter:
             name: self.client.sanitize_for_serialization(self.read(method).items)
             for name, method in methods.items()
         }
+
+    def events(self) -> list[dict]:
+        self.validate_identity()
+        events = []
+        continuation = None
+        for _ in range(20):
+            page = self.read(self.core.list_event_for_all_namespaces, limit=250, _continue=continuation)
+            events.extend(self.client.sanitize_for_serialization(page.items))
+            continuation = page.metadata._continue
+            if not continuation:
+                return events
+        raise KubeUnavailable("Kubernetes Event listing exceeded the local collection limit")
 
     def node(self, name: str) -> dict:
         if name not in WORKERS:

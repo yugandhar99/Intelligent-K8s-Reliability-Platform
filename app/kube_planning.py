@@ -210,6 +210,7 @@ class Inventory:
                 "generation": dep["generation"], "replicas": replicas,
                 "pdb": budgets[0]["metadata"]["name"], "pdb_uid": budgets[0]["metadata"]["uid"],
                 "pdb_generation": budgets[0]["metadata"]["generation"],
+                "pdb_observed_generation": budgets[0].get("status", {}).get("observedGeneration"),
                 "disruptions_allowed": budgets[0].get("status", {}).get("disruptionsAllowed", 0),
             })
         plan["capacity"], fits = self.forecast(target, residents)
@@ -223,3 +224,8 @@ def scope(plan: dict) -> tuple:
         tuple(pod[key] for key in ("uid", "deployment", "generation", "replicas", "pdb_uid", "pdb_generation"))
         for pod in plan["pods"]
     ]
+
+
+def disruption_available(plan: dict) -> bool:
+    return all(item["disruptions_allowed"] > 0 and item["pdb_observed_generation"] == item["pdb_generation"]
+               for item in plan["pods"])

@@ -46,19 +46,23 @@ class MaintenanceService:
     def create_plan(self, node: str) -> Plan:
         with self.store.transaction(write=True) as connection:
             cluster = self.store.snapshot(connection)
-            plan = Plan(id=uuid4().hex, node=node, cluster_revision=cluster.revision,
-                        safe=True, placements=[], problems=[])
-            try:
-                plan.placements = simulate_maintenance(cluster, node, self.policy)
-            except SafetyError as error:
-                plan.safe = False
-                plan.problems.append(error.problem)
+            plan = self.plan_for(cluster, node)
             connection.execute("INSERT INTO plans VALUES (?, ?)", (plan.id, plan.model_dump_json()))
         logger.info("maintenance.plan_created", extra={"fields": {
             "plan_id": plan.id, "node": node, "safe": plan.safe,
             "cluster_revision": plan.cluster_revision,
             "problem_codes": [problem.code for problem in plan.problems],
         }})
+        return plan
+
+    def plan_for(self, cluster: Cluster, node: str) -> Plan:
+        plan = Plan(id=uuid4().hex, node=node, cluster_revision=cluster.revision,
+                    safe=True, placements=[], problems=[])
+        try:
+            plan.placements = simulate_maintenance(cluster, node, self.policy)
+        except SafetyError as error:
+            plan.safe = False
+            plan.problems.append(error.problem)
         return plan
 
     def preview(self, plan_id: str) -> Plan:
