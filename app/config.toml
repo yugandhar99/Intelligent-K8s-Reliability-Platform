@@ -1,0 +1,4 @@
+[maintenance]
+protected_namespaces = ["kube-system", "platform-security"]
+termination_timeout_seconds = 30
+readiness_timeout_seconds = 60
