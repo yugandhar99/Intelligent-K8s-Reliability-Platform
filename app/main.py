@@ -10,6 +10,9 @@ import tomllib
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .batch_api import batch_router
+from .batch_models import BatchPolicy
+from .batch_service import BatchService
 from .models import AuditEvent, Cluster, ExecuteRequest, Operation, Plan, PlanRequest, PolicySettings
 from .policy import MaintenancePolicy
 from .service import MaintenanceService, RecordNotFound, logger
@@ -29,9 +32,13 @@ class JsonFormatter(logging.Formatter):
 
 def create_app(db_path: Path | None = None) -> FastAPI:
     with Path(__file__).with_name("config.toml").open("rb") as config:
-        settings = PolicySettings.model_validate(tomllib.load(config)["maintenance"])
+        configuration = tomllib.load(config)
+    settings = PolicySettings.model_validate(configuration["maintenance"])
+    defaults = BatchPolicy.model_validate(configuration["batch"])
     store = Store(db_path or Path(os.getenv("MAINTENANCE_DB", "data/cluster.sqlite3")))
-    service = MaintenanceService(store, MaintenancePolicy(settings))
+    policy = MaintenancePolicy(settings)
+    service = MaintenanceService(store, policy)
+    batch_service = BatchService(store, policy, defaults)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -42,10 +49,12 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             logger.setLevel(logging.INFO)
             logger.propagate = False
         store.initialize()
+        batch_service.initialize()
         yield
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.1.0", lifespan=lifespan)
+                  version="0.2.0", lifespan=lifespan)
+    app.include_router(batch_router(batch_service))
 
     @app.exception_handler(RecordNotFound)
     async def missing_record(_: Request, error: RecordNotFound) -> JSONResponse:

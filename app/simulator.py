@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from .constraints import broken_affinities
 from .models import Cluster, Placement, PodPhase, State
 from .policy import MaintenancePolicy, SafetyError
 
@@ -57,6 +58,9 @@ def simulate_maintenance(
         if pod.phase != PodPhase.READY or not cluster.nodes[pod.node].ready:
             raise SafetyError("replacement_unready", f"Replacement for {pod.name} is not Ready")
         policy.validate_availability(cluster, pod, evicting=False)
+    broken = broken_affinities(cluster)
+    if broken:
+        raise SafetyError("pod_affinity", f"Required pod affinity would be broken for {', '.join(broken)}")
     change_state(State.UNCORDONING)
     cluster.nodes[node].schedulable = True
     record("node.uncordoned", cluster.simulated_seconds, {})

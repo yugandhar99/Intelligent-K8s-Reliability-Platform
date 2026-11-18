@@ -80,6 +80,7 @@ class MaintenanceService:
             events = self._execute_plan(plan, cluster, operation)
             if operation.state == State.SUCCEEDED:
                 cluster.revision += 1
+                cluster.nodes[plan.node].last_maintenance_revision = cluster.revision
                 connection.execute("UPDATE cluster SET payload = ? WHERE id = 1", (cluster.model_dump_json(),))
             connection.execute("INSERT INTO operations VALUES (?, ?, ?)", (operation.id, plan.id, operation.model_dump_json()))
             connection.executemany(

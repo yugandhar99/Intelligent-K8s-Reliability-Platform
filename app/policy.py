@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 
+from .constraints import placement_blocks
 from .models import Cluster, Pod, PodPhase, PolicySettings, Problem, Resources
 
 
@@ -32,8 +33,9 @@ class MaintenancePolicy:
             and cluster.nodes[candidate.node].ready
             and (not evicting or candidate.name != pod.name)
         ]
-        if sum(candidate.workload == pod.workload for candidate in ready) < workload.min_available:
-            raise SafetyError("application_availability", f"Workload {pod.workload} requires {workload.min_available} ready pods")
+        workload_ready = sum(candidate.workload == pod.workload for candidate in ready)
+        if workload_ready < workload.min_available:
+            raise SafetyError("application_availability", f"Workload {pod.workload} would have {workload_ready} ready pods and requires {workload.min_available}")
         for budget in cluster.budgets:
             if workload.namespace != budget.namespace or workload.name not in budget.workloads:
                 continue
@@ -43,12 +45,15 @@ class MaintenancePolicy:
                 for candidate in ready
             )
             if count < budget.min_available:
-                raise SafetyError("disruption_budget", f"Budget {budget.name} requires {budget.min_available} ready pods")
+                raise SafetyError("disruption_budget", f"Budget {budget.name} would have {count} ready pods and requires {budget.min_available}")
 
     def destination(self, cluster: Cluster, pod: Pod) -> str:
         candidates: list[tuple[int, int, str]] = []
+        peers = {key: peer for key, peer in cluster.pods.items() if key != pod.name}
         for name, node in cluster.nodes.items():
             if name == pod.node or not node.ready or not node.schedulable:
+                continue
+            if placement_blocks(cluster, pod, node, peers):
                 continue
             occupants = [other for other in cluster.pods.values() if other.node == name]
             free_cpu = node.allocatable.cpu_millis - sum(other.requests.cpu_millis for other in occupants)

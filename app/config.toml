@@ -2,3 +2,13 @@
 protected_namespaces = ["kube-system", "platform-security"]
 termination_timeout_seconds = 30
 readiness_timeout_seconds = 60
+
+[batch]
+max_unavailable_nodes = 2
+parallel_limit = 2
+operation_deadline_seconds = 180
+retry_limit = 3
+backoff_base_seconds = 2
+backoff_max_seconds = 16
+search_limit = 10000
+windows = []
