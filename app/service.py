@@ -74,6 +74,7 @@ class MaintenanceService:
             if previous is not None:
                 return Operation.model_validate_json(previous[0])
 
+            self.store.check_synchronous_write(connection, "single", plan_id)
             plan = load_record(connection, "SELECT payload FROM plans WHERE id = ?", plan_id, Plan)
             cluster = self.store.snapshot(connection)
             operation = Operation(id=uuid4().hex, plan_id=plan.id, node=plan.node)

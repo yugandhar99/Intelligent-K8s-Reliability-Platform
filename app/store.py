@@ -7,6 +7,10 @@ from .models import Cluster
 from .scenarios import synthetic_cluster
 
 
+class MaintenanceConflict(Exception):
+    pass
+
+
 class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -42,3 +46,11 @@ class Store:
     def snapshot(connection: sqlite3.Connection) -> Cluster:
         row = connection.execute("SELECT payload FROM cluster WHERE id = 1").fetchone()
         return Cluster.model_validate_json(row[0])
+
+    @staticmethod
+    def check_synchronous_write(db: sqlite3.Connection, kind: str, plan_id: str) -> None:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone():
+            if db.execute("SELECT 1 FROM jobs WHERE kind = ? AND plan_id = ?", (kind, plan_id)).fetchone():
+                raise MaintenanceConflict("This plan already has a durable job")
+            if db.execute("SELECT 1 FROM job_owner").fetchone():
+                raise MaintenanceConflict("A durable job owns the simulated cluster")

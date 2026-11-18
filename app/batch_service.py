@@ -83,6 +83,7 @@ class BatchService:
             ).fetchone()
             if previous is not None:
                 return BatchOperation.model_validate_json(previous[0])
+            self.store.check_synchronous_write(db, "batch", plan_id)
             original = load_record(db, "SELECT payload FROM batch_plans WHERE id = ?", plan_id, BatchPlan)
             cluster = self.store.snapshot(db)
             result = self.run(original, cluster, self.read_policy(db))

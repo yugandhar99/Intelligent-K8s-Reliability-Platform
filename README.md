@@ -140,3 +140,23 @@ The two pressure families were constructed to expose greedy placement failures. 
 - Placement implements a subset of Kubernetes semantics. Node affinity uses exact label matches, pod affinity uses explicit workload IDs, and the simulator has no storage topology, selector expressions, preemption, or eviction toleration timers.
 - Parallelism is modeled inside a wave. Separate API operations are serialized by SQLite, and operation status becomes visible at commit. The UTC window is checked at execution start and the remaining window and deadline are consumed on the virtual clock.
 - Batch policy applies to batch endpoints. The original single-node endpoints retain their Stage 1 policy and stale-plan behavior. The local API has no authentication.
+
+## Stage 3 durable maintenance
+
+Create a single-node or batch plan through its existing endpoint, then submit its ID to the durable queue. Jobs advance in the background and survive application restarts. The existing synchronous execution and dry-run endpoints remain available.
+
+```bash
+api=http://127.0.0.1:8000
+batch=$(curl -fsS "$api/maintenance/batches/plans" \
+  -H 'Content-Type: application/json' -d '{"nodes":["cedar","maple"]}')
+plan_id=$(printf '%s' "$batch" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+job=$(curl -fsS "$api/maintenance/jobs" -H 'Content-Type: application/json' \
+  -d "{\"kind\":\"batch\",\"plan_id\":\"$plan_id\"}")
+job_id=$(printf '%s' "$job" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -fsS "$api/maintenance/jobs/$job_id" | python -m json.tool
+curl -fsS "$api/maintenance/jobs/$job_id/history" | python -m json.tool
+```
+
+The same plan and kind return the same job. A batch checkpoints one wave at a time, and a single-node job checkpoints the complete maintenance operation. Pause and cancel take effect at transaction boundaries. Completed waves remain visible after cancellation or a later failure.
+
+See the [recovery guide](docs/RECOVERY.md) for endpoints, failure scenarios, backup and restore commands, and measured results.

@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
@@ -13,10 +14,13 @@ from fastapi.responses import JSONResponse
 from .batch_api import batch_router
 from .batch_models import BatchPolicy
 from .batch_service import BatchService
+from .job_api import job_router
+from .job_worker import JobWorker
+from .jobs import JobService
 from .models import AuditEvent, Cluster, ExecuteRequest, Operation, Plan, PlanRequest, PolicySettings
 from .policy import MaintenancePolicy
 from .service import MaintenanceService, RecordNotFound, logger
-from .store import Store
+from .store import MaintenanceConflict, Store
 
 
 class JsonFormatter(logging.Formatter):
@@ -40,6 +44,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     service = MaintenanceService(store, policy)
     batch_service = BatchService(store, policy, defaults)
 
+    jobs = JobService(service, batch_service)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if not logger.handlers:
@@ -50,11 +56,22 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             logger.propagate = False
         store.initialize()
         batch_service.initialize()
-        yield
+        jobs.initialize()
+        worker = JobWorker(jobs)
+        worker.start()
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(worker.close)
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.2.0", lifespan=lifespan)
+                  version="0.3.0", lifespan=lifespan)
     app.include_router(batch_router(batch_service))
+    app.include_router(job_router(jobs))
+
+    @app.exception_handler(MaintenanceConflict)
+    async def operation_conflict(_: Request, error: MaintenanceConflict) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(error)})
 
     @app.exception_handler(RecordNotFound)
     async def missing_record(_: Request, error: RecordNotFound) -> JSONResponse:
