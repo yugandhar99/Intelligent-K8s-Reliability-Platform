@@ -1,11 +1,11 @@
-"""Durable jobs for the SQLite-backed cluster simulator."""
+"""Durable maintenance jobs and fenced worker leases."""
 
 from collections.abc import Callable
 from hashlib import sha256
 import json
 import sqlite3
 from time import time
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -20,7 +20,11 @@ from .service import MaintenanceService, RecordNotFound, load_record
 from .store import MaintenanceConflict
 
 
-Kind = Literal["single", "batch"]
+if TYPE_CHECKING:
+    from .kube_jobs import LiveMaintenance
+
+
+Kind = Literal["single", "batch", "kubernetes"]
 Command = Literal["pause", "resume", "cancel"]
 FaultHook = Callable[[str, "Job"], None]
 TerminalState = Literal["succeeded", "failed", "rejected", "cancelled"]
@@ -86,6 +90,7 @@ class JobService:
         self.clock = clock
         self.lease_seconds = lease_seconds
         self.fault = fault
+        self.live: LiveMaintenance | None = None
 
     def initialize(self) -> None:
         with self.store.transaction(write=True) as db:
@@ -126,6 +131,8 @@ class JobService:
         return load_record(db, "SELECT payload FROM plans WHERE id = ?", plan_id, Plan)
 
     def submit(self, kind: Kind, plan_id: str) -> Job:
+        if kind == "kubernetes":
+            raise MaintenanceConflict("Kubernetes execution requires the live approval endpoint")
         with self.store.transaction(write=True) as db:
             row = db.execute("SELECT payload FROM jobs WHERE kind = ? AND plan_id = ?", (kind, plan_id)).fetchone()
             if row:
@@ -171,6 +178,8 @@ class JobService:
     def control(self, job_id: str, command: Command) -> Job:
         with self.store.transaction(write=True) as db:
             job = self.get(db, job_id)
+            if job.kind == "kubernetes":
+                raise MaintenanceConflict("Live jobs reconcile and release owned cordons automatically")
             target = {"pause": "paused", "resume": "queued", "cancel": "cancelled"}[command]
             if job.state == target:
                 return job
@@ -247,10 +256,13 @@ class JobService:
             if row is None:
                 row = db.execute("""SELECT payload, fence FROM jobs
                                     WHERE json_extract(payload, '$.state') IN ('queued', 'retrying')
-                                    ORDER BY rowid LIMIT 1""").fetchone()
+                                    AND (kind != 'kubernetes' OR ?)
+                                    ORDER BY rowid LIMIT 1""", (self.live is not None,)).fetchone()
             if row is None:
                 return None
             job = Job.model_validate_json(row[0])
+            if job.kind == "kubernetes" and self.live is None:
+                return None
             if job.state not in {"queued", "retrying"} or job.next_attempt > now:
                 return None
             fence = row[1] + 1
@@ -270,6 +282,12 @@ class JobService:
             if row is None:
                 return False
             job = Job.model_validate_json(row[0])
+            if job.kind == "kubernetes":
+                if self.live is None:
+                    return False
+                self.live.step(db, job)
+                db.execute("UPDATE jobs SET worker = NULL, expiry = 0 WHERE id = ?", (job.id,))
+                return True
             prepared = Checkpoint.model_validate_json(row[1]) if row[1] else None
             if prepared and not self.reconcile(db, job, prepared):
                 return True

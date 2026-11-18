@@ -1,4 +1,4 @@
-"""Run short, fenced simulator transactions on a background thread."""
+"""Run fenced maintenance steps on a background thread."""
 
 import sqlite3
 from threading import Event, Thread

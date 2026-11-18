@@ -39,12 +39,28 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         configuration = tomllib.load(config)
     settings = PolicySettings.model_validate(configuration["maintenance"])
     defaults = BatchPolicy.model_validate(configuration["batch"])
-    store = Store(db_path or Path(os.getenv("MAINTENANCE_DB", "data/cluster.sqlite3")))
+    mode = os.getenv("MAINTENANCE_MODE", "simulation")
+    default_db = "data/live.sqlite3" if mode == "kubernetes" else "data/cluster.sqlite3"
+    store = Store(db_path or Path(os.getenv("MAINTENANCE_DB", default_db)))
     policy = MaintenancePolicy(settings)
     service = MaintenanceService(store, policy)
     batch_service = BatchService(store, policy, defaults)
 
     jobs = JobService(service, batch_service)
+    if mode not in {"simulation", "kubernetes"}:
+        raise ValueError("MAINTENANCE_MODE must be simulation or kubernetes")
+    live = None
+    if mode == "kubernetes":
+        from .kube_adapter import KubeUnavailable, KubernetesAdapter, LabSafetyError
+        from .kube_api import live_router
+        from .kube_jobs import LiveMaintenance
+
+        approval_token = os.environ["LAB_APPROVAL_TOKEN"]
+        if len(approval_token) < 32:
+            raise ValueError("LAB_APPROVAL_TOKEN requires at least 32 characters")
+        adapter = KubernetesAdapter(Path(os.environ["LAB_KUBECONFIG"]), Path(os.environ["LAB_IDENTITY"]))
+        live = jobs.live = LiveMaintenance(jobs, adapter)
+
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -57,17 +73,32 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         store.initialize()
         batch_service.initialize()
         jobs.initialize()
+        if live:
+            live.initialize()
         worker = JobWorker(jobs)
         worker.start()
         try:
             yield
         finally:
             await asyncio.to_thread(worker.close)
+            if live:
+                live.adapter.close()
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.3.0", lifespan=lifespan)
+                  version="0.4.0", lifespan=lifespan)
     app.include_router(batch_router(batch_service))
     app.include_router(job_router(jobs))
+
+    if live:
+        app.include_router(live_router(live, approval_token))
+
+        @app.exception_handler(LabSafetyError)
+        async def unsafe_lab(_: Request, error: LabSafetyError) -> JSONResponse:
+            return JSONResponse(status_code=409, content={"detail": str(error)})
+
+        @app.exception_handler(KubeUnavailable)
+        async def lab_unavailable(_: Request, error: KubeUnavailable) -> JSONResponse:
+            return JSONResponse(status_code=503, content={"detail": str(error)})
 
     @app.exception_handler(MaintenanceConflict)
     async def operation_conflict(_: Request, error: MaintenanceConflict) -> JSONResponse:
@@ -87,7 +118,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         service.cluster()
-        return {"status": "ok", "mode": "simulation"}
+        if live:
+            live.adapter.validate_identity()
+        return {"status": "ok", "mode": mode}
 
     @app.get("/cluster")
     def cluster() -> Cluster:

@@ -1,6 +1,6 @@
 # Intelligent Kubernetes Maintenance & Reliability Platform
 
-This standalone, simulation-only platform plans and rehearses Kubernetes node maintenance. Stage 2 adds multi-node maintenance while retaining the Stage 1 single-node API. It starts with an original synthetic cluster of three nodes, three workloads, and five pods. The application uses FastAPI, Pydantic, and SQLite and has no Kubernetes client or credentials integration.
+This standalone platform plans and rehearses Kubernetes node maintenance. Simulation remains the default and seeds an original cluster of three nodes, three workloads, and five pods. Stage 4 adds opt-in discovery, dry-run forecasts, and approved maintenance against a dedicated four-node Kind lab. The simulator, batch scheduling, and durable job APIs are still available.
 
 ## Run locally
 
@@ -15,6 +15,10 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Open the API documentation at `http://127.0.0.1:8000/docs`. The default database is `data/cluster.sqlite3`. Set `MAINTENANCE_DB=data/rehearsal.sqlite3` before launching Uvicorn to use a separate simulation. A new database seeds the original topology automatically. Edit [app/config.toml](app/config.toml) and restart the API to change the protected namespaces and simulated timeouts.
+
+## Run the Kubernetes lab
+
+Use [the Kubernetes lab guide](docs/KUBERNETES.md) to create `k8s-reliability-lab`, install the demo workloads and restricted credentials, review a live dry-run plan, and approve a worker drain. The guide includes the measured integration test results. Live mode patches scheduling and evicts eligible pods through Kubernetes. Reboot and OS patching are simulated.
 
 ## Rehearse single-node maintenance
 

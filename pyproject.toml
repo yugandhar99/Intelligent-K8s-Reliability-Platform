@@ -1,7 +1,7 @@
 [project]
 name = "intelligent-k8s-reliability-platform"
-version = "0.3.0"
-description = "Simulation-only Kubernetes maintenance policy and workflow engine"
+version = "0.4.0"
+description = "Kubernetes maintenance policy and workflow engine"
 requires-python = ">=3.11"
 dynamic = ["dependencies"]
 
