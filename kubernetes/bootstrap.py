@@ -1,6 +1,6 @@
 """Provision credentials and demo workloads on the dedicated local Kind cluster."""
 
-from base64 import b64decode
+from base64 import b64decode 
 from hashlib import sha256
 import json
 import os
