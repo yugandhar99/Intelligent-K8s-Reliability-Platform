@@ -144,7 +144,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 yield
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.7.0", lifespan=lifespan)
+                  version="1.0.0", lifespan=lifespan)
     app.state.telemetry = telemetry
     app.add_middleware(HTTPMonitoring, telemetry=telemetry)
 

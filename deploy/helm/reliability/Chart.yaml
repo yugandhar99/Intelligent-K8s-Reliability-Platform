@@ -2,6 +2,6 @@ apiVersion: v2
 name: reliability-platform
 description: Simulation-first Kubernetes maintenance and AIOps API with its durable worker
 type: application
-version: 0.7.0
-appVersion: "0.7.0"
+version: 1.0.0
+appVersion: "1.0.0"
 kubeVersion: ">=1.28.0-0"

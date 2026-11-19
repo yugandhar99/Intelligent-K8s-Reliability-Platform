@@ -1,7 +1,8 @@
 [project]
 name = "intelligent-k8s-reliability-platform"
-version = "0.7.0"
+version = "1.0.0"
 description = "Kubernetes maintenance policy and workflow engine"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dynamic = ["dependencies"]
 
