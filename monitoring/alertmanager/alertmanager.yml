@@ -1,0 +1,11 @@
+route:
+  receiver: local-notifications
+  group_by: [alertname, mode]
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1h
+receivers:
+  - name: local-notifications
+    webhook_configs:
+      - url: http://receiver:9095/alerts
+        send_resolved: true

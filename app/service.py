@@ -10,6 +10,7 @@ from .models import AuditEvent, Cluster, Operation, Plan, State
 from .policy import MaintenancePolicy, SafetyError
 from .simulator import EventDetails, simulate_maintenance
 from .store import Store
+from .telemetry import simulated_eviction_event, sync_operation
 
 
 logger = logging.getLogger("maintenance")
@@ -70,6 +71,7 @@ class MaintenanceService:
             plan = load_record(connection, "SELECT payload FROM plans WHERE id = ?", plan_id, Plan)
         return self.create_plan(plan.node)
 
+    @sync_operation("single")
     def execute(self, plan_id: str) -> Operation:
         with self.store.transaction(write=True) as connection:
             previous = connection.execute(
@@ -93,6 +95,7 @@ class MaintenanceService:
                 [(operation.id, event.model_dump_json()) for event in events],
             )
         for event in events:
+            simulated_eviction_event(event.event, event.details)
             logger.info(event.event, extra={"fields": event.model_dump(mode="json")})
         return operation
 

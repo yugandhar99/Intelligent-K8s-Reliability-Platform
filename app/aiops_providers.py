@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from .aiops_signals import RULES, Observation, Signal
 from .store import Store
+from .telemetry import CURRENT, PROVIDERS, SpanKind, span
 
 
 Runbook = Literal["inspect_crash", "inspect_memory", "inspect_scheduling", "inspect_node",
@@ -253,6 +254,20 @@ class AIService:
                     ON CONFLICT(provider) DO UPDATE SET failures=excluded.failures, until=excluded.until, probe=NULL""",
                            (provider.name, failures, until))
 
+    @staticmethod
+    def call(provider: Provider, evidence: str, timeout: float) -> Completion:
+        started = monotonic()
+        outcome = "error"
+        name = provider.name if provider.name in PROVIDERS else "other"
+        with span("aiops.provider", kind=SpanKind.CLIENT, attributes={"ai.provider": name}) as current:
+            try:
+                result = provider.complete(evidence, timeout)
+                outcome = "ok"
+                return result
+            finally:
+                if telemetry := CURRENT.get():
+                    telemetry.ai_time.labels(telemetry.mode, name, outcome).observe(monotonic() - started)
+
     def classify(self, recommendation: str, observations: list[Observation]) -> tuple[Brief, str, str | None]:
         evidence = provider_input(observations)
         # For this control-only ASCII prompt, reserve one token per byte plus API framing headroom.
@@ -267,12 +282,14 @@ class AIService:
                     break
                 result = None
                 try:
-                    result = provider.complete(evidence, self.timeout)
+                    result = self.call(provider, evidence, self.timeout)
                     if result.input_tokens > input_ceiling or result.output_tokens > OUTPUT_LIMIT:
                         raise ProviderFailure("usage_limit_exceeded")
                     brief = Brief.model_validate_json(result.text)
                     brief.verify(observations)
                 except (ValidationError, ValueError):
+                    if (telemetry := CURRENT.get()) and provider.name in PROVIDERS:
+                        telemetry.ai_rejected.labels(telemetry.mode, provider.name).inc()
                     self.finish(provider, attempt, "invalid_output", result)
                     fallback = "invalid_output"
                     break

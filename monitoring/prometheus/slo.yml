@@ -1,0 +1,48 @@
+groups:
+  - name: reliability_slos
+    rules:
+      - record: reliability:api_events:rate1h
+        expr: sum by (mode) (rate(reliability_http_requests_total{route!~"unmatched|/health"}[1h]))
+      - record: reliability:maintenance_events:rate1h
+        expr: |
+          sum by (mode) (
+            label_replace(rate(reliability_job_duration_seconds_count{outcome!="cancelled"}[1h]), "execution", "durable", "workflow", ".*")
+            or label_replace(rate(reliability_sync_maintenance_duration_seconds_count[1h]), "execution", "sync", "workflow", ".*")
+          )
+      - record: reliability:maintenance_good:rate1h
+        expr: |
+          sum by (mode) (
+            label_replace(rate(reliability_job_duration_seconds_count{outcome="succeeded"}[1h]), "execution", "durable", "workflow", ".*")
+            or label_replace(rate(reliability_sync_maintenance_duration_seconds_count{outcome="succeeded"}[1h]), "execution", "sync", "workflow", ".*")
+          )
+      - record: reliability:recovery_events:rate1h
+        expr: sum by (mode) (rate(reliability_recovery_duration_seconds_count[1h]))
+      - record: reliability:sli_ratio:rate1h
+        labels: {slo: api}
+        expr: |
+          1 - ((sum by (mode) (rate(reliability_http_requests_total{status_class="5xx",route!~"unmatched|/health"}[1h]))
+          or (0 * reliability:api_events:rate1h)) / (reliability:api_events:rate1h > 0))
+      - record: reliability:sli_ratio:rate1h
+        labels: {slo: maintenance}
+        expr: |
+          (reliability:maintenance_good:rate1h or (0 * reliability:maintenance_events:rate1h))
+          / (reliability:maintenance_events:rate1h > 0)
+      - record: reliability:sli_ratio:rate1h
+        labels: {slo: recovery}
+        expr: |
+          (sum by (mode) (rate(reliability_recovery_duration_seconds_count{outcome="good"}[1h]))
+          or (0 * reliability:recovery_events:rate1h)) / (reliability:recovery_events:rate1h > 0)
+      - record: reliability:error_budget_remaining_ratio:rate1h
+        expr: |
+          1 - ((1 - reliability:sli_ratio:rate1h)
+          / on (mode, slo) (1 - max by (mode, slo) (reliability_slo_target_ratio)))
+      - record: reliability:api_latency_p95_seconds:rate5m
+        expr: histogram_quantile(0.95, sum by (mode, le) (rate(reliability_http_request_duration_seconds_bucket{route!="unmatched"}[5m])))
+      - record: reliability:api_errors_ratio:rate5m
+        expr: |
+          sum by (mode) (rate(reliability_http_requests_total{status_class="5xx",route!="unmatched"}[5m]))
+          / (sum by (mode) (rate(reliability_http_requests_total{route!="unmatched"}[5m])) > 0)
+      - record: reliability:ai_provider_availability_ratio:rate5m
+        expr: |
+          sum by (mode, provider) (rate(reliability_ai_attempt_duration_seconds_count{outcome="ok"}[5m]))
+          / (sum by (mode, provider) (rate(reliability_ai_attempt_duration_seconds_count[5m])) > 0)

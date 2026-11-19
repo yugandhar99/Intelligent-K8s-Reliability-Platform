@@ -9,6 +9,7 @@ from .kube_planning import Inventory, disruption_available, ready, scope, worker
 from .models import Problem
 from .service import RecordNotFound, logger
 from .store import MaintenanceConflict
+from .telemetry import CURRENT
 
 
 class LiveMaintenance:
@@ -60,6 +61,8 @@ class LiveMaintenance:
                "deadline": self.jobs.clock() + self.deadline, "require_disruption": require_disruption}
         db.execute("INSERT INTO live_checkpoints VALUES (?, ?)", (job.id, json.dumps(run)))
         self.audit(db, job, "live.approved", approver=approver, node=plan["node"], plan=plan_id)
+        if not require_disruption and (telemetry := CURRENT.get()):
+            telemetry.approval_time.labels("kubernetes").observe(max(0, self.jobs.clock() - plan["created"]))
         return job
 
     def audit(self, db, job: Job, event: str, **fields) -> None:
@@ -95,6 +98,8 @@ class LiveMaintenance:
             self.notify(db, job, run["plan"], "EvictionBlocked")
             self.jobs.ready(db, job)
         except KubeUnavailable as error:
+            if phase == "evict" and (telemetry := CURRENT.get()):
+                telemetry.eviction_retry.labels("kubernetes").inc()
             job.retries += 1
             job.state = "retrying"
             job.next_attempt = self.jobs.clock() + min(10, 0.5 * 2 ** min(job.retries, 5))

@@ -13,8 +13,9 @@ from .aiops_signals import (
     kube_observations, observation,
 )
 from .jobs import TERMINAL, JobService
-from .service import RecordNotFound
+from .service import RecordNotFound, logger
 from .store import MaintenanceConflict
+from .telemetry import traced
 
 APPROVAL_SECONDS = 300
 EVIDENCE_LIMIT = 12
@@ -81,6 +82,9 @@ class IncidentService:
             self.ai.initialize(db)
 
     def audit(self, db, incident: str, event: str, actor: str = "system", **detail) -> None:
+        logger.info(event, extra={"fields": {"incident_id": incident,
+                                              **{key: detail[key] for key in ("job", "recommendation", "signal")
+                                                 if key in detail}}})
         db.execute("INSERT INTO ai_incident_audit(incident_id,timestamp,event,actor,detail) VALUES (?,?,?,?,?)",
                    (incident, self.clock(), event, actor, json.dumps(detail)))
 
@@ -134,6 +138,7 @@ class IncidentService:
                 findings.append(observation("engine", "pdb", str(sequence), node, occurred, node=node))
         return findings
 
+    @traced("aiops.collect")
     def collect(self) -> dict:
         now = self.clock()
         findings = []
@@ -272,6 +277,7 @@ class IncidentService:
                               (incident,))
             return [json.loads(row[0]) for row in rows]
 
+    @traced("aiops.recommend", argument=0, identifier="incident_id")
     def recommend(self, incident: str) -> dict:
         with self.store.transaction() as db:
             _, _, revision, resolved, _ = self.require(db, incident)

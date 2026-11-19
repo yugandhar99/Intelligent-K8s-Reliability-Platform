@@ -11,6 +11,7 @@ from .scheduler import build_plan
 from .service import load_record, logger
 from .simulator import EventDetails
 from .store import Store
+from .telemetry import simulated_eviction_event, sync_operation
 
 
 def utc_now() -> datetime:
@@ -76,6 +77,7 @@ class BatchService:
             original = load_record(db, "SELECT payload FROM batch_plans WHERE id = ?", plan_id, BatchPlan)
             return self.plan_for(db, original.nodes)
 
+    @sync_operation("batch")
     def execute(self, plan_id: str) -> BatchOperation:
         with self.store.transaction(write=True) as db:
             previous = db.execute(

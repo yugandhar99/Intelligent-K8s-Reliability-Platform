@@ -9,8 +9,9 @@ from time import time
 import sqlite3
 import tomllib
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest, start_http_server
 
 from .aiops import IncidentService
 from .aiops_api import Operators, aiops_router
@@ -25,6 +26,8 @@ from .models import AuditEvent, Cluster, ExecuteRequest, Operation, Plan, PlanRe
 from .policy import MaintenancePolicy
 from .service import MaintenanceService, RecordNotFound, logger
 from .store import MaintenanceConflict, Store
+from .telemetry import HTTPMonitoring, Telemetry, trace_fields
+from .telemetry_state import ClusterMonitor, DurableCollector
 
 
 class JsonFormatter(logging.Formatter):
@@ -35,6 +38,7 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "event": record.getMessage(),
             **fields,
+            **trace_fields(),
         })
 
 
@@ -53,7 +57,14 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     jobs = JobService(service, batch_service)
     if mode not in {"simulation", "kubernetes"}:
         raise ValueError("MAINTENANCE_MODE must be simulation or kubernetes")
+    objectives = {name.lower(): float(os.getenv(f"OBS_SLO_{name}", fallback)) for name, fallback in
+                  (("API", "0.995"), ("MAINTENANCE", "0.95"), ("RECOVERY", "0.99"))}
+    recovery_deadline = float(os.getenv("OBS_RECOVERY_DEADLINE_SECONDS", "10"))
+    if not all(0 < target < 1 for target in objectives.values()) or not 0 < recovery_deadline <= 3600:
+        raise ValueError("Observability objectives or recovery deadline are out of range")
+    telemetry = Telemetry(mode, objectives, recovery_deadline, endpoint=os.getenv("OBS_OTLP_TRACES_ENDPOINT"))
     live = None
+    monitor = None
     collector = None
     if mode == "kubernetes":
         from .kube_adapter import KubeUnavailable, KubernetesAdapter, LabSafetyError
@@ -65,10 +76,17 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             raise ValueError("LAB_APPROVAL_TOKEN requires at least 32 characters")
         adapter = KubernetesAdapter(Path(os.environ["LAB_KUBECONFIG"]), Path(os.environ["LAB_IDENTITY"]))
         live = jobs.live = LiveMaintenance(jobs, adapter)
+        interval = float(os.getenv("OBS_CLUSTER_POLL_SECONDS", "5"))
+        if not 1 <= interval <= 3600:
+            raise ValueError("OBS_CLUSTER_POLL_SECONDS must be within 1 and 3600")
+        monitor = ClusterMonitor(adapter, telemetry, interval)
 
     operators = Operators(os.getenv("AIOPS_OPERATOR_TOKENS", "{}"))
     ai = AIService(store, configured_provider(), int(os.getenv("AIOPS_DAILY_LIMIT_MICROUSD", "0")), time)
     aiops = IncidentService(jobs, ai)
+    Gauge("reliability_ai_daily_limit_dollars", "Configured UTC-day AI spend limit in USD", ("mode",),
+          registry=telemetry.registry).labels(mode).set(ai.budget / 1_000_000)
+    telemetry.registry.register(DurableCollector(store, mode, aiops.pool, monitor))
     if live:
         from .aiops_collector import EventCollector
 
@@ -76,7 +94,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         if interval < 0:
             raise ValueError("AIOPS_COLLECTION_SECONDS must be nonnegative")
         if interval:
-            collector = EventCollector(aiops, interval)
+            collector = EventCollector(aiops, interval, telemetry=telemetry)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -92,8 +110,15 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         if live:
             live.initialize()
         aiops.initialize()
-        worker = JobWorker(jobs)
+        metrics_port = int(os.getenv("OBS_METRICS_PORT", "0"))
+        listener = None
+        if metrics_port:
+            listener, _ = start_http_server(metrics_port, addr=os.getenv("OBS_METRICS_ADDRESS", "127.0.0.1"),
+                                             registry=telemetry.registry)
+        worker = JobWorker(jobs, telemetry=telemetry)
         worker.start()
+        if monitor:
+            monitor.thread.start()
         if collector:
             collector.thread.start()
         try:
@@ -102,11 +127,24 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             if collector:
                 await asyncio.to_thread(collector.close)
             await asyncio.to_thread(worker.close)
+            if monitor:
+                await asyncio.to_thread(monitor.close)
             if live:
                 live.adapter.close()
+            if listener:
+                await asyncio.to_thread(listener.shutdown)
+                listener.server_close()
+            await asyncio.to_thread(telemetry.provider.shutdown)
 
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.5.0", lifespan=lifespan)
+                  version="0.6.0", lifespan=lifespan)
+    app.state.telemetry = telemetry
+    app.add_middleware(HTTPMonitoring, telemetry=telemetry)
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> Response:
+        return Response(generate_latest(telemetry.registry), headers={"Content-Type": CONTENT_TYPE_LATEST})
+
     app.include_router(batch_router(batch_service))
     app.include_router(job_router(jobs))
     app.include_router(aiops_router(aiops, operators))

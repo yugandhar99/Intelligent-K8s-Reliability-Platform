@@ -14,6 +14,8 @@ from kubernetes.client.exceptions import ApiException
 from urllib3.exceptions import HTTPError
 import yaml
 
+from .telemetry import kube_request
+
 LAB = "k8s-reliability-lab"
 NAMESPACE = "reliability-lab"
 WORKERS = frozenset(f"{LAB}-worker{suffix}" for suffix in ("", "2", "3"))
@@ -80,6 +82,7 @@ class KubernetesAdapter:
         self.core = client.CoreV1Api(self.client)
         self.apps = client.AppsV1Api(self.client)
         self.policy = client.PolicyV1Api(self.client)
+        self.metrics = client.CustomObjectsApi(self.client)
 
     def close(self) -> None:
         self.client.close()
@@ -89,7 +92,8 @@ class KubernetesAdapter:
     def read(method, *args, **kwargs):
         for attempt in range(3):
             try:
-                return method(*args, _request_timeout=TIMEOUT, **kwargs)
+                with kube_request("read"):
+                    return method(*args, _request_timeout=TIMEOUT, **kwargs)
             except ApiException as error:
                 if error.status == 404:
                     raise LabSafetyError("A required Kubernetes resource disappeared") from error
@@ -121,6 +125,16 @@ class KubernetesAdapter:
             for name, method in methods.items()
         }
 
+    def node_usage(self) -> dict | None:
+        try:
+            with kube_request("metrics"):
+                rows = self.metrics.list_cluster_custom_object(
+                    "metrics.k8s.io", "v1beta1", "nodes", _request_timeout=TIMEOUT,
+                )["items"]
+        except (ApiException, HTTPError, OSError):
+            return None
+        return {row["metadata"]["name"]: row["usage"] for row in rows}
+
     def events(self) -> list[dict]:
         self.validate_identity()
         events = []
@@ -141,7 +155,8 @@ class KubernetesAdapter:
     def mutate(self, method, *args, eviction: bool = False) -> None:
         self.validate_identity()
         try:
-            method(*args, _request_timeout=TIMEOUT)
+            with kube_request("evict" if eviction else "write", eviction=eviction):
+                method(*args, _request_timeout=TIMEOUT)
         except ApiException as error:
             if error.status == 429 and eviction:
                 raise EvictionBlocked("Eviction API returned HTTP 429") from error

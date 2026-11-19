@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+rule_files: [slo.yml, alerts.yml]
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+scrape_configs:
+  - job_name: reliability
+    static_configs:
+      - targets: [reliability.host:9108]
+        labels: {target_mode: simulation}
+      - targets: [reliability.host:9109]
+        labels: {target_mode: kubernetes}
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+  - job_name: alertmanager
+    static_configs:
+      - targets: [alertmanager:9093]

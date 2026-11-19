@@ -1,0 +1,45 @@
+name: reliability-observability
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports: ["127.0.0.1:9090:9090"]
+    extra_hosts: ["reliability.host:${OBS_SCRAPE_HOST:-host-gateway}"]
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${OBS_GRAFANA_PASSWORD:?Set OBS_GRAFANA_PASSWORD for the local dashboard}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager", "--cluster.listen-address="]
+    ports: ["127.0.0.1:9093:9093"]
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+  receiver:
+    image: python:3.12-slim
+    command: ["python", "-u", "/receiver.py"]
+    ports: ["127.0.0.1:9095:9095"]
+    volumes:
+      - ./monitoring/receiver.py:/receiver.py:ro
+  jaeger:
+    image: jaegertracing/all-in-one:1.72.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["127.0.0.1:16686:16686", "127.0.0.1:4318:4318"]
+volumes:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:

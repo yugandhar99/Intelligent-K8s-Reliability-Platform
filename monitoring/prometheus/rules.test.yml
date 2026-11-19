@@ -1,0 +1,125 @@
+rule_files: [slo.yml, alerts.yml]
+evaluation_interval: 5s
+fuzzy_compare: true
+tests:
+  - interval: 5s
+    input_series:
+      - series: 'reliability_http_requests_total{mode="simulation",route="/cluster",status_class="2xx"}'
+        values: '0+9x12'
+      - series: 'reliability_http_requests_total{mode="simulation",route="/cluster",status_class="5xx"}'
+        values: '0+1x12'
+      - series: 'reliability_http_requests_total{mode="simulation",route="/health",status_class="5xx"}'
+        values: '0+100x12'
+      - series: 'reliability_job_duration_seconds_count{mode="simulation",workflow="single",outcome="succeeded"}'
+        values: '0+3x12'
+      - series: 'reliability_sync_maintenance_duration_seconds_count{mode="simulation",workflow="single",outcome="failed"}'
+        values: '0+1x12'
+      - series: 'reliability_job_duration_seconds_count{mode="simulation",workflow="single",outcome="cancelled"}'
+        values: '0+9x12'
+      - series: 'reliability_recovery_duration_seconds_count{mode="simulation",outcome="good"}'
+        values: '0+4x12'
+      - series: 'reliability_recovery_duration_seconds_count{mode="simulation",outcome="late"}'
+        values: '0+1x12'
+      - series: 'reliability_slo_target_ratio{mode="simulation",slo="api"}'
+        values: '0.95+0x12'
+      - series: 'reliability_ai_attempt_duration_seconds_count{mode="simulation",provider="mock",outcome="ok"}'
+        values: '0+4x12'
+      - series: 'reliability_ai_attempt_duration_seconds_count{mode="simulation",provider="mock",outcome="error"}'
+        values: '0+1x12'
+    promql_expr_test:
+      - expr: 'reliability:sli_ratio:rate1h{slo="api"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'reliability:sli_ratio:rate1h{mode="simulation",slo="api"}'
+            value: 0.9
+      - expr: 'reliability:sli_ratio:rate1h{slo="maintenance"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'reliability:sli_ratio:rate1h{mode="simulation",slo="maintenance"}'
+            value: 0.75
+      - expr: 'reliability:sli_ratio:rate1h{slo="recovery"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'reliability:sli_ratio:rate1h{mode="simulation",slo="recovery"}'
+            value: 0.8
+      - expr: 'round(reliability:error_budget_remaining_ratio:rate1h, 0.01)'
+        eval_time: 1m
+        exp_samples:
+          - labels: '{mode="simulation",slo="api"}'
+            value: -1
+      - expr: reliability:ai_provider_availability_ratio:rate5m
+        eval_time: 1m
+        exp_samples:
+          - labels: 'reliability:ai_provider_availability_ratio:rate5m{mode="simulation",provider="mock"}'
+            value: 0.8
+  - interval: 5s
+    input_series:
+      - series: 'reliability_pdb_violations{mode="kubernetes"}'
+        values: '0 1 1 1 1 1 1 0 0 0'
+      - series: 'reliability_cluster_nodes{mode="simulation",role="worker",state="unready"}'
+        values: '5+0x10'
+      - series: 'reliability_cluster_nodes{mode="kubernetes",role="worker",state="unready"}'
+        values: '0 1 1 1 1 1 1 0 0 0'
+      - series: 'reliability_workers_healthy{mode="simulation"}'
+        values: '1 0 0 0 0 0 0 1 1 1'
+      - series: 'reliability_ai_cost_today_dollars{mode="simulation",provider="mock"}'
+        values: '0 0.9 0.9 0.9 0.9 0.9 0.9 0 0 0'
+      - series: 'reliability_ai_daily_limit_dollars{mode="simulation"}'
+        values: '1+0x10'
+      - series: 'reliability_recovery_duration_seconds_count{mode="simulation",outcome="good"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - alertname: ApplicationDisruptionBudgetViolation
+        eval_time: 15s
+        exp_alerts: []
+      - alertname: ApplicationDisruptionBudgetViolation
+        eval_time: 20s
+        exp_alerts:
+          - exp_labels: {severity: critical, mode: kubernetes}
+            exp_annotations: {summary: "Healthy lab replicas are below a disruption budget minimum"}
+      - alertname: ApplicationDisruptionBudgetViolation
+        eval_time: 40s
+        exp_alerts: []
+      - alertname: KubernetesNodeDegraded
+        eval_time: 20s
+        exp_alerts:
+          - exp_labels: {severity: critical, mode: kubernetes}
+            exp_annotations: {summary: "One or more Kind nodes are unready"}
+      - alertname: MaintenanceWorkerUnavailable
+        eval_time: 20s
+        exp_alerts:
+          - exp_labels: {severity: critical, mode: simulation}
+            exp_annotations: {summary: "The maintenance database has no healthy worker lease"}
+      - alertname: AIDailySpendThreshold
+        eval_time: 20s
+        exp_alerts:
+          - exp_labels: {severity: warning, mode: simulation}
+            exp_annotations: {summary: "Estimated AI spend has reached 80 percent of the configured daily limit"}
+    promql_expr_test:
+      - expr: 'reliability:sli_ratio:rate1h{slo="recovery"}'
+        eval_time: 40s
+        exp_samples: []
+  - interval: 5s
+    input_series:
+      - series: 'up{job="reliability",target_mode="kubernetes"}'
+        values: '1 0 0 0 0 0 0 1 1 1'
+      - series: 'reliability_oldest_active_job_seconds{mode="kubernetes"}'
+        values: '0 100 100 100 100 100 100 0 0 0'
+      - series: 'reliability_cluster_pressure_nodes{mode="kubernetes",resource="memory"}'
+        values: '0 1 1 1 1 1 1 0 0 0'
+    alert_rule_test:
+      - alertname: ReliabilityTargetDown
+        eval_time: 25s
+        exp_alerts:
+          - exp_labels: {severity: critical, job: reliability, target_mode: kubernetes}
+            exp_annotations: {summary: "Observability target is unreachable"}
+      - alertname: MaintenanceProlonged
+        eval_time: 20s
+        exp_alerts:
+          - exp_labels: {severity: warning, mode: kubernetes}
+            exp_annotations: {summary: "A maintenance job has been active for over 90 seconds"}
+      - alertname: KubernetesResourcePressure
+        eval_time: 25s
+        exp_alerts:
+          - exp_labels: {severity: warning, mode: kubernetes, resource: memory}
+            exp_annotations: {summary: "Kind reports resource pressure or a high resource fraction"}

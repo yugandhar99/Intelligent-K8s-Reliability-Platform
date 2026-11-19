@@ -16,8 +16,9 @@ from .batch_service import BatchService
 from .models import Cluster, Operation, Plan, PolicySettings, Problem, State
 from .policy import SafetyError
 from .scheduler import build_plan
-from .service import MaintenanceService, RecordNotFound, load_record
+from .service import MaintenanceService, RecordNotFound, load_record, logger
 from .store import MaintenanceConflict
+from .telemetry import CURRENT, simulated_eviction_event, span
 
 
 if TYPE_CHECKING:
@@ -114,6 +115,10 @@ class JobService:
             )""")
 
     def event(self, db: sqlite3.Connection, job: Job, event: str, **details: str | int | float | bool) -> None:
+        if job.kind != "kubernetes":
+            simulated_eviction_event(event, details)
+        if CURRENT.get() and event in {"job.recovered", "job.succeeded", "job.failed", "job.rejected", "job.cancelled"}:
+            logger.info(event, extra={"fields": {"operation_id": job.id, "workflow": job.kind, "state": job.state}})
         db.execute("INSERT INTO job_history(job_id, timestamp, event, details) VALUES (?, ?, ?, ?)",
                    (job.id, self.clock(), event, json.dumps(details)))
 
@@ -238,16 +243,23 @@ class JobService:
             return self.recover_expired(db, self.clock())
 
     def recover_expired(self, db: sqlite3.Connection, now: float) -> int:
-        rows = db.execute("""SELECT payload, prepared FROM jobs
+        rows = db.execute("""SELECT payload, prepared, expiry FROM jobs
                              WHERE worker IS NOT NULL AND expiry <= ?""", (now,)).fetchall()
-        for payload, prepared in rows:
+        for payload, prepared, expiry in rows:
             job = Job.model_validate_json(payload)
-            db.execute("UPDATE jobs SET worker = NULL, expiry = 0, fence = fence + 1 WHERE id = ?", (job.id,))
-            if prepared and not self.reconcile(db, job, Checkpoint.model_validate_json(prepared)):
-                continue
-            job.state = "queued"
-            self.save(db, job)
-            self.event(db, job, "job.recovered", checkpoint=job.checkpoint)
+            with span("maintenance.worker.recovery", operation_id=job.id):
+                db.execute("UPDATE jobs SET worker = NULL, expiry = 0, fence = fence + 1 WHERE id = ?", (job.id,))
+                reconciled = not prepared or self.reconcile(db, job, Checkpoint.model_validate_json(prepared))
+                if expiry > 0 and (telemetry := CURRENT.get()):
+                    mode = "kubernetes" if job.kind == "kubernetes" else "simulation"
+                    duration = max(0.0, now - expiry)
+                    telemetry.leases.labels(mode).inc()
+                    outcome = "failed" if not reconciled else "good" if duration <= telemetry.recovery_deadline else "late"
+                    telemetry.recovery.labels(mode, outcome).observe(duration)
+                if reconciled:
+                    job.state = "queued"
+                    self.save(db, job)
+                    self.event(db, job, "job.recovered", checkpoint=job.checkpoint)
         return len(rows)
 
     def claim(self, worker_id: str) -> Lease | None:

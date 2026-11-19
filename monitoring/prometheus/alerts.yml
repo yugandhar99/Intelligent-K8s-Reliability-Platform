@@ -1,0 +1,60 @@
+groups:
+  - name: reliability_alerts
+    rules:
+      - alert: ReliabilityTargetDown
+        expr: up{job="reliability"} == 0
+        for: 20s
+        labels: {severity: critical}
+        annotations: {summary: "Observability target is unreachable"}
+      - alert: KubernetesNodeDegraded
+        expr: sum by (mode) (reliability_cluster_nodes{mode="kubernetes",state="unready"}) > 0
+        for: 15s
+        labels: {severity: critical}
+        annotations: {summary: "One or more Kind nodes are unready"}
+      - alert: ClusterTelemetryStale
+        expr: reliability_cluster_poll_success{mode="kubernetes"} == 0 or (time() - reliability_cluster_last_success_timestamp_seconds{mode="kubernetes"} > 45)
+        for: 20s
+        labels: {severity: warning}
+        annotations: {summary: "Live cluster observations are stale or unavailable"}
+      - alert: ApplicationDisruptionBudgetViolation
+        expr: reliability_pdb_violations{mode="kubernetes"} > 0
+        for: 15s
+        labels: {severity: critical}
+        annotations: {summary: "Healthy lab replicas are below a disruption budget minimum"}
+      - alert: MaintenanceProlonged
+        expr: reliability_oldest_active_job_seconds > 90
+        for: 15s
+        labels: {severity: warning}
+        annotations: {summary: "A maintenance job has been active for over 90 seconds"}
+      - alert: MaintenanceWorkerUnavailable
+        expr: reliability_workers_healthy == 0
+        for: 15s
+        labels: {severity: critical}
+        annotations: {summary: "The maintenance database has no healthy worker lease"}
+      - alert: ExcessiveAPIErrors
+        expr: reliability:api_errors_ratio:rate5m > 0.05
+        for: 30s
+        labels: {severity: critical}
+        annotations: {summary: "Server errors exceed five percent over five minutes"}
+      - alert: KubernetesEvictionsFailing
+        expr: sum by (mode) (increase(reliability_eviction_attempts_total{mode="kubernetes",outcome!="ok"}[5m])) >= 2
+        for: 10s
+        labels: {severity: warning}
+        annotations: {summary: "Repeated Kubernetes eviction failures or uncertain responses"}
+      - alert: KubernetesResourcePressure
+        expr: reliability_cluster_pressure_nodes{mode="kubernetes"} > 0 or reliability_cluster_resource_ratio{mode="kubernetes"} > 0.85
+        for: 20s
+        labels: {severity: warning}
+        annotations: {summary: "Kind reports resource pressure or a high resource fraction"}
+      - alert: AIDailySpendThreshold
+        expr: |
+          (sum by (mode) (reliability_ai_cost_today_dollars)
+          / on (mode) (max by (mode) (reliability_ai_daily_limit_dollars) > 0)) >= 0.8
+        for: 15s
+        labels: {severity: warning}
+        annotations: {summary: "Estimated AI spend has reached 80 percent of the configured daily limit"}
+      - alert: ReliabilityErrorBudgetDepleted
+        expr: reliability:error_budget_remaining_ratio:rate1h < 0
+        for: 30s
+        labels: {severity: warning}
+        annotations: {summary: "An observed SLO has exceeded its rolling error budget"}
