@@ -1,0 +1,5 @@
+persistence:
+  retain: false
+  storageClass: standard
+observability:
+  apiSlo: "0.99"

@@ -2,7 +2,7 @@ groups:
   - name: reliability_slos
     rules:
       - record: reliability:api_events:rate1h
-        expr: sum by (mode) (rate(reliability_http_requests_total{route!~"unmatched|/health"}[1h]))
+        expr: sum by (mode) (rate(reliability_http_requests_total{route!~"unmatched|/health|/ready"}[1h]))
       - record: reliability:maintenance_events:rate1h
         expr: |
           sum by (mode) (
@@ -20,7 +20,7 @@ groups:
       - record: reliability:sli_ratio:rate1h
         labels: {slo: api}
         expr: |
-          1 - ((sum by (mode) (rate(reliability_http_requests_total{status_class="5xx",route!~"unmatched|/health"}[1h]))
+          1 - ((sum by (mode) (rate(reliability_http_requests_total{status_class="5xx",route!~"unmatched|/health|/ready"}[1h]))
           or (0 * reliability:api_events:rate1h)) / (reliability:api_events:rate1h > 0))
       - record: reliability:sli_ratio:rate1h
         labels: {slo: maintenance}

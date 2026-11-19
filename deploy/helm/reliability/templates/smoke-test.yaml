@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: {{ .Release.Namespace | quote }}
+  name: {{ include "reliability.name" . }}-smoke
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 45
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: smoke-test
+        app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    spec:
+      serviceAccountName: {{ include "reliability.name" . }}
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: probe
+          image: {{ include "reliability.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-c"]
+          args:
+            - |
+              import json
+              from urllib.request import urlopen
+              url = {{ printf "http://%s:%v" (include "reliability.name" .) .Values.service.port | quote }}
+              with urlopen(f"{url}/ready", timeout=8) as response:
+                  assert json.load(response) == {"status": "ready", "mode": "simulation"}
+              with urlopen(f"{url}/metrics", timeout=8) as response:
+                  assert b"reliability_workers_healthy" in response.read()
+          securityContext:
+            {{- include "reliability.containerSecurity" . | nindent 12 }}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 150m, memory: 96Mi}

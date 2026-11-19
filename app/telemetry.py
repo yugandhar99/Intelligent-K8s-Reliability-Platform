@@ -184,7 +184,7 @@ class HTTPMonitoring:
                     reason = ("auth" if status in {401, 403} else "validation" if status == 422
                               else "safety" if status < 500 else "unavailable")
                     telemetry.approval_rejected.labels(telemetry.mode, workflow, reason).inc()
-                if route not in {"/health", "unmatched"}:
+                if route not in {"/health", "/ready", "unmatched"}:
                     logger.info("http.completed", extra={"fields": {"route": route, "status": status, "method": method}})
 
 

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ .Release.Namespace | quote }}
+  name: {{ include "reliability.name" . }}
+data:
+  MAINTENANCE_MODE: simulation
+  MAINTENANCE_EXCLUSIVE_DB: "1"
+  AIOPS_PROVIDER: mock
+  MAINTENANCE_DB: /var/lib/reliability/cluster.sqlite3
+  OBS_SLO_API: {{ .Values.observability.apiSlo | quote }}
+  OBS_SLO_MAINTENANCE: {{ .Values.observability.maintenanceSlo | quote }}
+  OBS_SLO_RECOVERY: {{ .Values.observability.recoverySlo | quote }}
+  OBS_RECOVERY_DEADLINE_SECONDS: {{ .Values.observability.recoveryDeadlineSeconds | quote }}

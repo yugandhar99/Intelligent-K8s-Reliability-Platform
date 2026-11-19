@@ -1,0 +1,33 @@
+replicaCount: 1
+image:
+  repository: reliability-platform
+  tag: stage7-local
+  digest: ""
+  requireDigest: false
+  pullPolicy: Never
+persistence:
+  size: 1Gi
+  storageClass: ""
+  existingClaim: ""
+  retain: true
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+service:
+  port: 8000
+networkPolicy:
+  allowedNamespaces: []
+podDisruptionBudget:
+  minAvailable: 1
+configReader:
+  enabled: true
+observability:
+  apiSlo: "0.995"
+  maintenanceSlo: "0.95"
+  recoverySlo: "0.99"
+  recoveryDeadlineSeconds: "10"
+existingOperatorSecret: ""

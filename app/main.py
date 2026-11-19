@@ -24,6 +24,7 @@ from .job_worker import JobWorker
 from .jobs import JobService
 from .models import AuditEvent, Cluster, ExecuteRequest, Operation, Plan, PlanRequest, PolicySettings
 from .policy import MaintenancePolicy
+from .process_lock import exclusive_database
 from .service import MaintenanceService, RecordNotFound, logger
 from .store import MaintenanceConflict, Store
 from .telemetry import HTTPMonitoring, Telemetry, trace_fields
@@ -97,7 +98,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             collector = EventCollector(aiops, interval, telemetry=telemetry)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def initialized() -> AsyncIterator[None]:
         if not logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(JsonFormatter())
@@ -136,8 +137,14 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 listener.server_close()
             await asyncio.to_thread(telemetry.provider.shutdown)
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        with exclusive_database(store.path, enabled=os.getenv("MAINTENANCE_EXCLUSIVE_DB") == "1"):
+            async with initialized():
+                yield
+
     app = FastAPI(title="Intelligent Kubernetes Maintenance & Reliability Platform",
-                  version="0.6.0", lifespan=lifespan)
+                  version="0.7.0", lifespan=lifespan)
     app.state.telemetry = telemetry
     app.add_middleware(HTTPMonitoring, telemetry=telemetry)
 
@@ -181,6 +188,15 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         if live:
             live.adapter.validate_identity()
         return {"status": "ok", "mode": mode}
+
+    @app.get("/ready")
+    def ready() -> Response:
+        service.cluster()
+        if live:
+            live.adapter.validate_identity()
+        active = any(worker.healthy for worker in jobs.workers())
+        return JSONResponse({"status": "ready" if active else "waiting", "mode": mode},
+                            status_code=200 if active else 503)
 
     @app.get("/cluster")
     def cluster() -> Cluster:

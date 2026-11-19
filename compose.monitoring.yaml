@@ -1,44 +1,48 @@
 name: reliability-observability
 services:
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
-    ports: ["127.0.0.1:9090:9090"]
+    ports: ["127.0.0.1:${OBS_PROMETHEUS_PORT:-9090}:9090"]
     extra_hosts: ["reliability.host:${OBS_SCRAPE_HOST:-host-gateway}"]
     volumes:
       - ./monitoring/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
   grafana:
-    image: grafana/grafana:12.1.1
+    image: grafana/grafana:12.1.1@sha256:a1701c2180249361737a99a01bc770db39381640e4d631825d38ff4535efa47d
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: "${OBS_GRAFANA_PASSWORD:?Set OBS_GRAFANA_PASSWORD for the local dashboard}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["127.0.0.1:${OBS_GRAFANA_PORT:-3000}:3000"]
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
   alertmanager:
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
     command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager", "--cluster.listen-address="]
-    ports: ["127.0.0.1:9093:9093"]
+    ports: ["127.0.0.1:${OBS_ALERTMANAGER_PORT:-9093}:9093"]
     volumes:
       - ./monitoring/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
   receiver:
-    image: python:3.12-slim
+    image: python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+    user: "10001:10001"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     command: ["python", "-u", "/receiver.py"]
-    ports: ["127.0.0.1:9095:9095"]
+    ports: ["127.0.0.1:${OBS_RECEIVER_PORT:-9095}:9095"]
     volumes:
       - ./monitoring/receiver.py:/receiver.py:ro
   jaeger:
-    image: jaegertracing/all-in-one:1.72.0
+    image: jaegertracing/all-in-one:1.72.0@sha256:144b7028db6045b28b50c4728dd3bea14fa76ab024b64afeccec51c8cb1edd63
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    ports: ["127.0.0.1:16686:16686", "127.0.0.1:4318:4318"]
+    ports: ["127.0.0.1:${OBS_JAEGER_PORT:-16686}:16686", "127.0.0.1:${OBS_OTLP_PORT:-4318}:4318"]
 volumes:
   prometheus-data:
   grafana-data:

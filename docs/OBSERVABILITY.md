@@ -65,7 +65,7 @@ The dashboards are provisioned from JSON. Regenerate those definitions with `pyt
 
 ## SLIs and SLOs
 
-The recording rules use a rolling one-hour rate. An SLI remains absent until its denominator is positive. API health checks, scrape requests, and unmatched routes are excluded from API availability. Target outages are monitored separately by Prometheus `up`.
+The recording rules use a rolling one-hour rate. An SLI remains absent until its denominator is positive. API health and readiness checks, scrape requests, and unmatched routes are excluded from API availability. Target outages are monitored separately by Prometheus `up`.
 
 | Objective | Good events divided by eligible events | Environment variable | Default |
 | --- | --- | --- | --- |

@@ -1,0 +1,24 @@
+# Combine with compose.monitoring.yaml for application plus observability.
+services:
+  platform:
+    image: reliability-platform:stage7-local
+    build:
+      context: .
+    environment:
+      MAINTENANCE_MODE: simulation
+      AIOPS_PROVIDER: mock
+      OBS_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    ports: ["127.0.0.1:${PLATFORM_PORT:-8000}:8000"]
+    volumes:
+      - platform-data:/var/lib/reliability
+    read_only: true
+    tmpfs: ["/tmp:mode=1777"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 35s
+    init: true
+  prometheus:
+    volumes:
+      - ./monitoring/prometheus/prometheus.container.yml:/etc/prometheus/prometheus.yml:ro
+volumes:
+  platform-data:

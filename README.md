@@ -1,6 +1,6 @@
 # Intelligent Kubernetes Maintenance & Reliability Platform
 
-This standalone platform plans and rehearses Kubernetes node maintenance. Simulation remains the default and seeds an original cluster of three nodes, three workloads, and five pods. Stage 4 adds opt-in discovery, dry-run forecasts, and approved maintenance against a dedicated four-node Kind lab. Stage 5 adds event correlation, capacity warnings, and evidence-based recommendations with authenticated remediation approval. Stage 6 adds Prometheus metrics, OpenTelemetry traces, Grafana dashboards, SLOs, and local alerting. The simulator, batch scheduling, and durable job APIs are still available.
+This standalone platform plans and rehearses Kubernetes node maintenance. Simulation remains the default and seeds an original cluster of three nodes, three workloads, and five pods. Stage 4 adds opt-in discovery, dry-run forecasts, and approved maintenance against a dedicated four-node Kind lab. Stage 5 adds event correlation, capacity warnings, and evidence-based recommendations with authenticated remediation approval. Stage 6 adds Prometheus metrics, OpenTelemetry traces, Grafana dashboards, SLOs, and local alerting. Stage 7 adds a locked non-root container build, a single-writer Helm deployment, isolated Terraform infrastructure, and DevSecOps workflows. The simulator, batch scheduling, and durable job APIs are still available.
 
 ## Run locally
 
@@ -27,6 +27,10 @@ Start the API in simulation mode and send `POST /aiops/demo` to seed original in
 ## Monitor the platform
 
 The [observability guide](docs/OBSERVABILITY.md) starts Prometheus, Grafana, Alertmanager, and Jaeger with Docker Compose. It documents the metric labels and SLO calculations, shows how to reproduce a controlled Kind readiness failure, and links to four screenshots from the running Grafana stack.
+
+## Build and deploy locally
+
+The [DevSecOps guide](docs/DEVSECOPS.md) covers the container and monitoring stack, Kind-only Terraform and Helm workflows, CI and manual release safeguards, and measured validation and security scan results.
 
 ## Rehearse single-node maintenance
 

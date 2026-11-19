@@ -1,0 +1,5 @@
+# Paths are relative to deploy/terraform/environments/local.
+kubeconfig_path = "../../../../data/kind-admin.yaml"
+identity_path   = "../../../../data/kind-identity.json"
+namespace       = "stage7-tf-production-style"
+environment     = "production-style"

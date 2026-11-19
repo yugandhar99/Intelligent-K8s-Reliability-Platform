@@ -1,0 +1,61 @@
+name: Authorize a GHCR release
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing published stable GitHub release tag
+        type: string
+        required: true
+      confirm:
+        description: Enter publish to authorize GHCR publication
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: inputs.confirm == 'publish' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ghcr-release
+    concurrency:
+      group: ghcr-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify the authorization and release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          image="$(python3 deploy/release_gate.py)"
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+      - run: |
+          python3 deploy/install_tools.py "$RUNNER_TEMP/reliability-bin" trivy
+          printf '%s\n' "$RUNNER_TEMP/reliability-bin" >> "$GITHUB_PATH"
+      - name: Build and scan the authorized image
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          docker build --tag "$IMAGE" .
+          trivy image --scanners secret --format json --output "$RUNNER_TEMP/image-secrets.json" --exit-code 1 "$IMAGE"
+          trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE"
+      - name: Publish the authorized release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.release.outputs.image }}
+          DOCKER_CONFIG: ${{ runner.temp }}/ghcr-config
+        run: |
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE"
