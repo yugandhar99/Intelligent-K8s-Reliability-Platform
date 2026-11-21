@@ -1,6 +1,6 @@
 """Verify a real readiness failure and Alertmanager notification pair in the lab."""
 
-from base64 import b64decode 
+from base64 import b64decode
 from hashlib import sha256
 import json
 from pathlib import Path
