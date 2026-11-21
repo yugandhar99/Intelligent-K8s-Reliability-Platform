@@ -1,4 +1,4 @@
-name: Authorize a GHCR release 
+name: Authorize a GHCR release
 on:
   workflow_dispatch:
     inputs:
