@@ -1,6 +1,6 @@
 """Keep a bounded, local evidence buffer of Alertmanager notifications."""
 
-from collections import deque
+from collections import deque 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from threading import Lock
