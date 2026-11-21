@@ -1,5 +1,5 @@
 groups:
-  - name: reliability_alerts 
+  - name: reliability_alerts
     rules:
       - alert: ReliabilityTargetDown
         expr: up{job="reliability"} == 0
