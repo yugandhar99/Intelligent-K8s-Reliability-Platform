@@ -1,7 +1,7 @@
 {
   "uid": "slo-error-budget",
   "title": "SLO and Error Budget Monitoring",
-  "description": "Observed objectives, error budgets, API traffic and latency.",
+  "description": "Observed objectives, error budgets, API traffic and latency.", 
   "schemaVersion": 41,
   "version": 1,
   "editable": false,
