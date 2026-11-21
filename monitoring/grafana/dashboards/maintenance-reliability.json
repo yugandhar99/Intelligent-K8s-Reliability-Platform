@@ -1,7 +1,7 @@
 {
   "uid": "maintenance-reliability",
   "title": "Maintenance Operations and Reliability",
-  "description": "Work queue, execution latency, evictions and worker recovery.",
+  "description": "Work queue, execution latency, evictions and worker recovery.", 
   "schemaVersion": 41,
   "version": 1,
   "editable": false,
