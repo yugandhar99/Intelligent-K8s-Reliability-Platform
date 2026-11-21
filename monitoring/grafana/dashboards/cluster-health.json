@@ -1,7 +1,7 @@
 {
   "uid": "cluster-health",
   "title": "Kubernetes Cluster Health",
-  "description": "Live Kind health and simulator state with explicit measurement mode.",
+  "description": "Live Kind health and simulator state with explicit measurement mode.", 
   "schemaVersion": 41,
   "version": 1,
   "editable": false,
