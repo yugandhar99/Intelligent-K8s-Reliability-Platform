@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-OUT = Path(__file__).with_name("grafana") / "dashboards" 
+OUT = Path(__file__).with_name("grafana") / "dashboards"
 DATASOURCE = {"type": "prometheus", "uid": "reliability-prometheus"}
 LATENCY = "reliability_http_request_duration_seconds_bucket"
 DURATION = "reliability_job_duration_seconds_bucket"
