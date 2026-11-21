@@ -1,7 +1,7 @@
 {
   "uid": "aiops-performance",
   "title": "AIOps and AI Provider Performance",
-  "description": "Incident lifecycle, provider behavior, spending and human decisions.", 
+  "description": "Incident lifecycle, provider behavior, spending and human decisions.",
   "schemaVersion": 41,
   "version": 1,
   "editable": false,
