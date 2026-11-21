@@ -1,4 +1,4 @@
-name: DevSecOps validation 
+name: DevSecOps validation
 on:
   push:
     branches: [main, master]
